@@ -735,6 +735,12 @@ async def handle_call_tool(name: str, arguments: dict[str, Any]) -> list[TextCon
         from utils.file_utils import check_total_file_size
         from utils.model_context import ModelContext
 
+        # Skip model resolution for tools that don't require models (e.g., planner, docgen)
+        if not tool.requires_model():
+            logger.debug(f"Tool {name} doesn't require model resolution - skipping model validation")
+            # Execute tool directly without model context
+            return await tool.execute(arguments)
+
         # Get model from arguments or use default
         model_name = arguments.get("model") or DEFAULT_MODEL
         logger.debug(f"Initial model for {name}: {model_name}")
@@ -743,15 +749,6 @@ async def handle_call_tool(name: str, arguments: dict[str, Any]) -> list[TextCon
         model_name, model_option = parse_model_option(model_name)
         if model_option:
             logger.debug(f"Parsed model format - model: '{model_name}', option: '{model_option}'")
-
-        # Consensus tool handles its own model configuration validation
-        # No special handling needed at server level
-
-        # Skip model resolution for tools that don't require models (e.g., planner)
-        if not tool.requires_model():
-            logger.debug(f"Tool {name} doesn't require model resolution - skipping model validation")
-            # Execute tool directly without model context
-            return await tool.execute(arguments)
 
         # Handle auto mode at MCP boundary - resolve to specific model
         if model_name.lower() == "auto":

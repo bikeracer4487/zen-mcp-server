@@ -1332,7 +1332,7 @@ async def main():
             read_stream,
             write_stream,
             InitializationOptions(
-                server_name="zen",
+                server_name="doug-zen",
                 server_version=__version__,
                 capabilities=ServerCapabilities(
                     tools=ToolsCapability(),  # Advertise tool support capability
@@ -1343,7 +1343,7 @@ async def main():
 
 
 def run():
-    """Console script entry point for zen-mcp-server."""
+    """Console script entry point for doug-zen-mcp-server."""
     try:
         asyncio.run(main())
     except KeyboardInterrupt:

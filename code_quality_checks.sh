@@ -1,18 +1,18 @@
 #!/bin/bash
 
-# Zen MCP Server - Code Quality Checks
+# Doug-Zen MCP Server - Code Quality Checks
 # This script runs all required linting and testing checks before committing changes.
 # ALL checks must pass 100% for CI/CD to succeed.
 
 set -e  # Exit on any error
 
-echo "🔍 Running Code Quality Checks for Zen MCP Server"
+echo "🔍 Running Code Quality Checks for Doug-Zen MCP Server"
 echo "================================================="
 
 # Determine Python command
-if [[ -f ".zen_venv/bin/python" ]]; then
-    PYTHON_CMD=".zen_venv/bin/python"
-    PIP_CMD=".zen_venv/bin/pip"
+if [[ -f ".doug-zen_venv/bin/python" ]]; then
+    PYTHON_CMD=".doug-zen_venv/bin/python"
+    PIP_CMD=".doug-zen_venv/bin/pip"
     echo "✅ Using venv"
 elif [[ -n "$VIRTUAL_ENV" ]]; then
     PYTHON_CMD="python"
@@ -32,7 +32,7 @@ DEV_DEPS_NEEDED=false
 # Check each dev dependency
 for tool in ruff black isort pytest; do
     # Check if tool exists in venv or in PATH
-    if [[ -f ".zen_venv/bin/$tool" ]] || command -v $tool &> /dev/null; then
+    if [[ -f ".doug-zen_venv/bin/$tool" ]] || command -v $tool &> /dev/null; then
         continue
     else
         DEV_DEPS_NEEDED=true
@@ -49,11 +49,11 @@ else
 fi
 
 # Set tool paths
-if [[ -f ".zen_venv/bin/ruff" ]]; then
-    RUFF=".zen_venv/bin/ruff"
-    BLACK=".zen_venv/bin/black"
-    ISORT=".zen_venv/bin/isort"
-    PYTEST=".zen_venv/bin/pytest"
+if [[ -f ".doug-zen_venv/bin/ruff" ]]; then
+    RUFF=".doug-zen_venv/bin/ruff"
+    BLACK=".doug-zen_venv/bin/black"
+    ISORT=".doug-zen_venv/bin/isort"
+    PYTEST=".doug-zen_venv/bin/pytest"
 else
     RUFF="ruff"
     BLACK="black"
@@ -73,7 +73,7 @@ echo "🎨 Running black code formatting..."
 $BLACK . --exclude="test_simulation_files/"
 
 echo "📦 Running import sorting with isort..."
-$ISORT . --skip-glob=".zen_venv/*" --skip-glob="test_simulation_files/*"
+$ISORT . --skip-glob=".doug-zen_venv/*" --skip-glob="test_simulation_files/*"
 
 echo "✅ Verifying all linting passes..."
 $RUFF check --exclude test_simulation_files

@@ -36,13 +36,13 @@ function Write-Emoji {
     Write-ColorText $Text -Color $Color
 }
 
-Write-Emoji "🧪" "Running Integration Tests for Zen MCP Server" -Color Cyan
+Write-Emoji "🧪" "Running Integration Tests for Doug-Zen MCP Server" -Color Cyan
 Write-ColorText "==============================================" -Color Cyan
 Write-ColorText "These tests use real API calls with your configured keys"
 Write-Host ""
 
 # Check for virtual environment
-$venvPath = ".zen_venv"
+$venvPath = ".doug-zen_venv"
 $activateScript = if ($IsWindows -or $env:OS -eq "Windows_NT") {
     "$venvPath\Scripts\Activate.ps1"
 } else {

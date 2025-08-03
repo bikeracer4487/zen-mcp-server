@@ -1,6 +1,6 @@
 # Advanced Usage Guide
 
-This guide covers advanced features, configuration options, and workflows for power users of the Zen MCP server.
+This guide covers advanced features, configuration options, and workflows for power users of the Doug-Zen MCP server.
 
 ## Table of Contents
 

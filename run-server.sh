@@ -29,7 +29,7 @@ readonly RED='\033[0;31m'
 readonly NC='\033[0m' # No Color
 
 # Configuration
-readonly VENV_PATH=".zen_venv"
+readonly VENV_PATH=".doug-zen_venv"
 readonly DOCKER_CLEANED_FLAG=".docker_cleaned"
 readonly DESKTOP_CONFIG_FLAG=".desktop_configured"
 readonly LOG_DIR="logs"
@@ -160,9 +160,9 @@ cleanup_docker() {
     local containers=(
         "gemini-mcp-server"
         "gemini-mcp-redis"
-        "zen-mcp-server"
-        "zen-mcp-redis"
-        "zen-mcp-log-monitor"
+        "doug-zen-mcp-server"
+        "doug-zen-mcp-redis"
+        "doug-zen-mcp-log-monitor"
     )
     
     # Remove containers
@@ -179,7 +179,7 @@ cleanup_docker() {
     done
     
     # Remove images
-    local images=("gemini-mcp-server:latest" "zen-mcp-server:latest")
+    local images=("gemini-mcp-server:latest" "doug-zen-mcp-server:latest")
     for image in "${images[@]}"; do
         if docker images --format "{{.Repository}}:{{.Tag}}" | grep -q "^${image}$" 2>/dev/null; then
             if [[ "$found_artifacts" == false ]]; then
@@ -741,7 +741,7 @@ setup_venv() {
                     print_error "Permission denied creating virtual environment"
                     echo ""
                     echo "Try running in a different directory:"
-                    echo "  cd ~ && git clone <repository-url> && cd zen-mcp-server && ./run-server.sh"
+                    echo "  cd ~ && git clone <repository-url> && cd doug-zen-mcp-server && ./run-server.sh"
                     echo ""
                     exit 1
                 else
@@ -1325,7 +1325,7 @@ EOF
 # Check and update Gemini CLI configuration
 check_gemini_cli_integration() {
     local script_dir="$1"
-    local zen_wrapper="$script_dir/zen-mcp-server"
+    local zen_wrapper="$script_dir/doug-zen-mcp-server"
     
     # Check if Gemini settings file exists
     local gemini_config="$HOME/.gemini/settings.json"
@@ -1357,10 +1357,10 @@ check_gemini_cli_integration() {
 # Wrapper script for Gemini CLI compatibility
 DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$DIR"
-exec .zen_venv/bin/python server.py "$@"
+exec .doug-zen_venv/bin/python server.py "$@"
 EOF
         chmod +x "$zen_wrapper"
-        print_success "Created zen-mcp-server wrapper script"
+        print_success "Created doug-zen-mcp-server wrapper script"
     fi
     
     # Update Gemini settings
@@ -1442,7 +1442,7 @@ display_config_instructions() {
     cat << EOF
    {
      "mcpServers": {
-       "zen": {
+       "doug-zen": {
          "command": "$python_cmd",
          "args": ["$server_path"]
        }
@@ -1468,8 +1468,8 @@ EOF
     cat << EOF
    {
      "mcpServers": {
-       "zen": {
-         "command": "$script_dir/zen-mcp-server"
+       "doug-zen": {
+         "command": "$script_dir/doug-zen-mcp-server"
        }
      }
    }
@@ -1518,7 +1518,7 @@ show_help() {
     echo "  $0 --clear-cache Clear Python cache (fixes import issues)"
     echo ""
     echo "For more information, visit:"
-    echo "  https://github.com/BeehiveInnovations/zen-mcp-server"
+    echo "  https://github.com/BeehiveInnovations/doug-zen-mcp-server"
 }
 
 # Show version only

@@ -717,11 +717,28 @@ class BaseWorkflowMixin(ABC):
 
             return [TextContent(type="text", text=json.dumps(response_data, indent=2, ensure_ascii=False))]
 
-        except Exception as e:
-            logger.error(f"Error in {self.get_name()} work: {e}", exc_info=True)
+        except (ValueError, KeyError, AttributeError, TypeError) as e:
+            # Expected errors from data processing, validation, or missing attributes
+            logger.error(f"Validation/data error in {self.get_name()}: {e}")
             error_data = {
                 "status": f"{self.get_name()}_failed",
-                "error": str(e),
+                "error": f"Validation error: {str(e)}",
+                "step_number": arguments.get("step_number", 0),
+            }
+        except (FileNotFoundError, PermissionError, OSError) as e:
+            # File system related errors
+            logger.error(f"File system error in {self.get_name()}: {e}")
+            error_data = {
+                "status": f"{self.get_name()}_failed", 
+                "error": f"File system error: {str(e)}",
+                "step_number": arguments.get("step_number", 0),
+            }
+        except Exception as e:
+            # Unexpected errors - log with full traceback and re-raise for proper debugging
+            logger.error(f"Unexpected error in {self.get_name()}: {e}", exc_info=True)
+            error_data = {
+                "status": f"{self.get_name()}_failed",
+                "error": f"Unexpected error: {str(e)}",
                 "step_number": arguments.get("step_number", 0),
             }
 

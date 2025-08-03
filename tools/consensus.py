@@ -11,12 +11,14 @@ Key features:
 - Context-aware file embedding
 - Support for stance-based analysis (for/against/neutral)
 - Final synthesis combining all perspectives
+- Thread-safe state management using ThreadContext
 """
 
 from __future__ import annotations
 
 import json
 import logging
+import os
 from typing import TYPE_CHECKING, Any
 
 from pydantic import Field, model_validator
@@ -27,8 +29,10 @@ if TYPE_CHECKING:
 from mcp.types import TextContent
 
 from config import TEMPERATURE_ANALYTICAL
+from providers.registry import ModelProviderRegistry
 from systemprompts import CONSENSUS_PROMPT
 from tools.shared.base_models import WorkflowRequest
+from utils.conversation_memory import add_turn, get_thread
 
 from .workflow.base import WorkflowTool
 
@@ -49,30 +53,27 @@ CONSENSUS_WORKFLOW_FIELD_DESCRIPTIONS = {
     ),
     "total_steps": (
         "Total number of steps needed. This equals the number of models to consult. "
-        "Step 1 includes your analysis + first model consultation on return of the call. Final step includes "
-        "last model consultation + synthesis."
+        "Step 1 includes your analysis + first model consultation on return of the call. Final step includes last model consultation + synthesis."
     ),
     "next_step_required": ("Set to true if more models need to be consulted. False when ready for final synthesis."),
     "findings": (
         "In step 1, provide your comprehensive analysis of the proposal. In steps 2+, summarize the key points "
         "from the model response received, noting agreements and disagreements with previous analyses."
     ),
+    "models": (
+        "List of model configurations to consult. Each can have a model name, stance (for/against/neutral), "
+        "and optional custom stance prompt. The same model can be used multiple times with different stances, "
+        "but each model + stance combination must be unique. Example: "
+        "[{'model': 'o3', 'stance': 'for'}, {'model': 'o3', 'stance': 'against'}, {'model': 'flash', 'stance': 'neutral'}]"
+    ),
+    "current_model_index": (
+        "Internal tracking of which model is being consulted (0-based index). Used to determine which model to call next."
+    ),
+    "model_responses": ("Accumulated responses from models consulted so far. Internal field for tracking progress."),
     "relevant_files": (
         "Files that are relevant to the consensus analysis. Include files that help understand the proposal, "
         "provide context, or contain implementation details."
     ),
-    "models": (
-        "List of model configurations to consult. Each can have a model name, stance (for/against/neutral), "
-        "and optional custom stance prompt. The same model can be used multiple times with different stances, "
-        "but each model + stance combination must be unique. "
-        "Example: [{'model': 'o3', 'stance': 'for'}, {'model': 'o3', 'stance': 'against'}, "
-        "{'model': 'flash', 'stance': 'neutral'}]"
-    ),
-    "current_model_index": (
-        "Internal tracking of which model is being consulted (0-based index). Used to determine which model "
-        "to call next."
-    ),
-    "model_responses": ("Accumulated responses from models consulted so far. Internal field for tracking progress."),
     "images": (
         "Optional list of image paths or base64 data URLs for visual context. Useful for UI/UX discussions, "
         "architecture diagrams, mockups, or any visual references that help inform the consensus analysis."
@@ -81,89 +82,68 @@ CONSENSUS_WORKFLOW_FIELD_DESCRIPTIONS = {
 
 
 class ConsensusRequest(WorkflowRequest):
-    """Request model for consensus workflow steps"""
+    """Request model specific to consensus workflow with additional fields."""
 
-    # Required fields for each step
-    step: str = Field(..., description=CONSENSUS_WORKFLOW_FIELD_DESCRIPTIONS["step"])
-    step_number: int = Field(..., description=CONSENSUS_WORKFLOW_FIELD_DESCRIPTIONS["step_number"])
-    total_steps: int = Field(..., description=CONSENSUS_WORKFLOW_FIELD_DESCRIPTIONS["total_steps"])
-    next_step_required: bool = Field(..., description=CONSENSUS_WORKFLOW_FIELD_DESCRIPTIONS["next_step_required"])
+    # Override base fields that need consensus-specific behavior
+    confidence: str | None = Field(None, exclude=True)  # Not used in consensus
+    hypothesis: str | None = Field(None, exclude=True)  # Not used in consensus
+    files_checked: list[str] | None = Field(None, exclude=True)  # Not used in consensus
+    relevant_context: list[str] | None = Field(None, exclude=True)  # Not used in consensus
+    issues_found: list[dict[str, Any]] | None = Field(None, exclude=True)  # Not used in consensus
+    backtrack_from_step: int | None = Field(None, exclude=True)  # Not used in consensus
 
-    # Investigation tracking fields
-    findings: str = Field(..., description=CONSENSUS_WORKFLOW_FIELD_DESCRIPTIONS["findings"])
-    confidence: str = Field(default="exploring", exclude=True, description="Not used")
-
-    # Consensus-specific fields (only needed in step 1)
-    models: list[dict] | None = Field(None, description=CONSENSUS_WORKFLOW_FIELD_DESCRIPTIONS["models"])
-    relevant_files: list[str] | None = Field(
+    # consensus-specific fields
+    models: list[dict[str, Any]] = Field(
         default_factory=list,
-        description=CONSENSUS_WORKFLOW_FIELD_DESCRIPTIONS["relevant_files"],
+        description=CONSENSUS_WORKFLOW_FIELD_DESCRIPTIONS["models"],
     )
-
-    # Internal tracking fields
     current_model_index: int | None = Field(
-        0,
+        None,
+        ge=0,
         description=CONSENSUS_WORKFLOW_FIELD_DESCRIPTIONS["current_model_index"],
     )
-    model_responses: list[dict] | None = Field(
+    model_responses: list[dict[str, Any]] | None = Field(
         default_factory=list,
         description=CONSENSUS_WORKFLOW_FIELD_DESCRIPTIONS["model_responses"],
     )
-
-    # Optional images for visual debugging
-    images: list[str] | None = Field(default=None, description=CONSENSUS_WORKFLOW_FIELD_DESCRIPTIONS["images"])
-
-    # Override inherited fields to exclude them from schema
-    temperature: float | None = Field(default=None, exclude=True)
-    thinking_mode: str | None = Field(default=None, exclude=True)
-    use_websearch: bool | None = Field(default=None, exclude=True)
-
-    # Not used in consensus workflow
-    files_checked: list[str] | None = Field(default_factory=list, exclude=True)
-    relevant_context: list[str] | None = Field(default_factory=list, exclude=True)
-    issues_found: list[dict] | None = Field(default_factory=list, exclude=True)
-    hypothesis: str | None = Field(None, exclude=True)
-    backtrack_from_step: int | None = Field(None, exclude=True)
+    images: list[str] | None = Field(
+        None,
+        description=CONSENSUS_WORKFLOW_FIELD_DESCRIPTIONS["images"],
+    )
 
     @model_validator(mode="after")
-    def validate_step_one_requirements(self):
-        """Ensure step 1 has required models field and unique model+stance combinations."""
-        if self.step_number == 1:
-            if not self.models:
-                raise ValueError("Step 1 requires 'models' field to specify which models to consult")
-
-            # Check for unique model + stance combinations
-            seen_combinations = set()
+    def validate_models(self) -> ConsensusRequest:
+        """Validate model configurations"""
+        if self.models:
+            # Check for unique model+stance combinations
+            seen_combos = set()
             for model_config in self.models:
                 model_name = model_config.get("model", "")
                 stance = model_config.get("stance", "neutral")
-                combination = f"{model_name}:{stance}"
+                combo = f"{model_name}:{stance}"
+                if combo in seen_combos:
+                    msg = f"Duplicate model+stance combination: {combo}. Each combination must be unique."
+                    raise ValueError(msg)
+                seen_combos.add(combo)
+        return self
 
-                if combination in seen_combinations:
-                    raise ValueError(
-                        f"Duplicate model + stance combination found: {model_name} with stance '{stance}'. "
-                        f"Each model + stance combination must be unique."
-                    )
-                seen_combinations.add(combination)
+    @model_validator(mode="after")
+    def validate_step_consistency(self) -> ConsensusRequest:
+        """Ensure step numbers are consistent with progress"""
+        if self.step_number > self.total_steps:
+            msg = f"step_number ({self.step_number}) cannot exceed total_steps ({self.total_steps})"
+            raise ValueError(msg)
+
+        # For final step, next_step_required should be False
+        if self.step_number == self.total_steps and self.next_step_required:
+            msg = "For the final step, next_step_required should be False"
+            raise ValueError(msg)
 
         return self
 
 
 class ConsensusTool(WorkflowTool):
-    """
-    Consensus workflow tool for step-by-step multi-model consensus gathering.
-
-    This tool implements a structured consensus workflow where the CLI agent first provides
-    its own neutral analysis, then consults each specified model individually,
-    and finally synthesizes all perspectives into a unified recommendation.
-    """
-
-    def __init__(self):
-        super().__init__()
-        self.initial_prompt: str | None = None
-        self.models_to_consult: list[dict] = []
-        self.accumulated_responses: list[dict] = []
-        self._current_arguments: dict[str, Any] = {}
+    """Multi-model consensus workflow tool for complex decision making"""
 
     def get_name(self) -> str:
         return "consensus"
@@ -184,6 +164,8 @@ class ConsensusTool(WorkflowTool):
             "- Models can have stances (for/against/neutral) for structured debate\n"
             "- Same model can be used multiple times with different stances\n"
             "- Each model + stance combination must be unique\n\n"
+            "AUTO MODE: Leave models field empty or use ['auto'] to automatically select "
+            "a diverse panel of 3-5 models with balanced stances.\n\n"
             "Perfect for: complex decisions, architectural choices, feature proposals, "
             "technology evaluations, strategic planning."
         )
@@ -325,143 +307,142 @@ of the evidence, even when it strongly points in one direction.""",
         Note: confidence parameter is kept for compatibility with base class but not used.
         """
         if step_number == 1:
-            # CLI Agent's initial analysis
             return [
-                "You've provided your initial analysis. The tool will now consult other models.",
-                "Wait for the next step to receive the first model's response.",
+                "Provide your own balanced, objective analysis of the proposal",
+                "Consider technical feasibility, user value, and implementation complexity",
+                "Identify key benefits, risks, and alternatives",
+                "Form an initial assessment before consulting other models",
             ]
-        elif step_number < total_steps - 1:
-            # Processing individual model responses
+        elif step_number <= total_steps:
             return [
-                "Review the model response provided in this step",
-                "Note key agreements and disagreements with previous analyses",
-                "Wait for the next model's response",
+                f"Review the response from model {step_number - 1}",
+                "Identify key agreements and disagreements with previous analyses",
+                "Note any new insights or perspectives introduced",
+                f"Call consensus again with step_number: {step_number + 1}",
             ]
         else:
-            # Ready for final synthesis
             return [
-                "All models have been consulted",
-                "Synthesize all perspectives into a comprehensive recommendation",
-                "Identify key points of agreement and disagreement",
-                "Provide clear, actionable guidance based on the consensus",
+                "Synthesize all model responses into a cohesive consensus",
+                "Identify areas of agreement and disagreement",
+                "Provide final recommendations based on the collective analysis",
             ]
 
-    def should_call_expert_analysis(self, consolidated_findings, request=None) -> bool:
-        """Consensus workflow doesn't use traditional expert analysis - it consults models step by step."""
+    def should_call_expert_analysis(self, consolidated_findings) -> bool:
+        """Consensus workflow doesn't use external expert analysis - it IS the analysis"""
         return False
 
     def prepare_expert_analysis_context(self, consolidated_findings) -> str:
-        """Not used in consensus workflow."""
+        """Not used in consensus workflow"""
         return ""
 
-    def requires_expert_analysis(self) -> bool:
-        """Consensus workflow handles its own model consultations."""
-        return False
+    def _get_consensus_state(self, thread_id: str) -> dict[str, Any] | None:
+        """Retrieve consensus state from ThreadContext metadata"""
+        if not thread_id:
+            return None
 
-    def requires_model(self) -> bool:
-        """
-        Consensus tool doesn't require model resolution at the MCP boundary.
+        thread = get_thread(thread_id)
+        if not thread:
+            return None
 
-        Uses it's own set of models
+        # Look for consensus state in the most recent turn's metadata
+        for turn in reversed(thread.turns):
+            if turn.tool_name == "consensus" and turn.model_metadata:
+                consensus_state = turn.model_metadata.get("consensus_state")
+                if consensus_state:
+                    return consensus_state
 
-        Returns:
-            bool: False
-        """
-        return False
+        return None
 
-    # Hook method overrides for consensus-specific behavior
+    def _save_consensus_state(
+        self,
+        thread_id: str,
+        state: dict[str, Any],
+        role: str = "assistant",
+        content: str = "",
+    ) -> None:
+        """Save consensus state to ThreadContext metadata"""
+        if not thread_id:
+            logger.warning("Cannot save consensus state without thread_id")
+            return
 
-    def prepare_step_data(self, request) -> dict:
-        """Prepare consensus-specific step data."""
-        step_data = {
-            "step": request.step,
-            "step_number": request.step_number,
-            "findings": request.findings,
-            "files_checked": [],  # Not used
-            "relevant_files": request.relevant_files or [],
-            "relevant_context": [],  # Not used
-            "issues_found": [],  # Not used
-            "confidence": "exploring",  # Not used, kept for compatibility
-            "hypothesis": None,  # Not used
-            "images": request.images or [],  # Now used for visual context
-        }
-        return step_data
-
-    async def handle_work_completion(self, response_data: dict, request, arguments: dict) -> dict:  # noqa: ARG002
-        """Handle consensus workflow completion - no expert analysis, just final synthesis."""
-        response_data["consensus_complete"] = True
-        response_data["status"] = "consensus_workflow_complete"
-
-        # Prepare final synthesis data
-        response_data["complete_consensus"] = {
-            "initial_prompt": self.initial_prompt,
-            "models_consulted": [m["model"] + ":" + m.get("stance", "neutral") for m in self.accumulated_responses],
-            "total_responses": len(self.accumulated_responses),
-            "consensus_confidence": "high",  # Consensus complete
-        }
-
-        response_data["next_steps"] = (
-            "CONSENSUS GATHERING IS COMPLETE. You MUST now synthesize all perspectives and present:\n"
-            "1. Key points of AGREEMENT across models\n"
-            "2. Key points of DISAGREEMENT and why they differ\n"
-            "3. Your final consolidated recommendation\n"
-            "4. Specific, actionable next steps for implementation\n"
-            "5. Critical risks or concerns that must be addressed"
+        # Add turn with consensus state in metadata
+        add_turn(
+            thread_id=thread_id,
+            role=role,
+            content=content or "Consensus state updated",
+            tool_name="consensus",
+            model_metadata={"consensus_state": state},
         )
 
-        return response_data
-
-    def handle_work_continuation(self, response_data: dict, request) -> dict:
-        """Handle continuation between consensus steps."""
-        current_idx = request.current_model_index or 0
-
-        if request.step_number == 1:
-            # After CLI Agent's initial analysis, prepare to consult first model
-            response_data["status"] = "consulting_models"
-            response_data["next_model"] = self.models_to_consult[0] if self.models_to_consult else None
-            response_data["next_steps"] = (
-                "Your initial analysis is complete. The tool will now consult the specified models."
-            )
-        elif current_idx < len(self.models_to_consult):
-            next_model = self.models_to_consult[current_idx]
-            response_data["status"] = "consulting_next_model"
-            response_data["next_model"] = next_model
-            response_data["models_remaining"] = len(self.models_to_consult) - current_idx
-            response_data["next_steps"] = f"Model consultation in progress. Next: {next_model['model']}"
-        else:
-            response_data["status"] = "ready_for_synthesis"
-            response_data["next_steps"] = "All models consulted. Ready for final synthesis."
-
-        return response_data
-
     async def execute_workflow(self, arguments: dict[str, Any]) -> list:
-        """Override execute_workflow to handle model consultations between steps."""
+        """Override execute_workflow to handle model consultations while properly calling parent."""
 
-        # Store arguments
-        self._current_arguments = arguments
+        # Auto-panel injection - check if models field is empty or contains "auto"
+        if not arguments.get("models") or arguments.get("models") in ([], ["auto"], ["AUTO"]):
+            topic = arguments.get("step", "")
+            max_models = int(os.environ.get("MCP_CONSENSUS_MAX_MODELS", "5"))
+            arguments["models"] = self._build_auto_panel(topic, max_models)
+            panel_info = [f"{m['model']}:{m.get('stance', 'neutral')}" for m in arguments["models"]]
+            logger.info(f"Auto-selected consensus panel: {panel_info}")
 
         # Validate request
         request = self.get_workflow_request_model()(**arguments)
 
-        # On first step, store the models to consult
+        # Get or initialize consensus state from ThreadContext
+        thread_id = request.continuation_id
+        consensus_state = None
+
+        if thread_id:
+            consensus_state = self._get_consensus_state(thread_id)
+
+        # On first step, initialize state
         if request.step_number == 1:
-            self.initial_prompt = request.step
-            self.models_to_consult = request.models or []
-            self.accumulated_responses = []
-            # Set total steps: len(models) (each step includes consultation + response)
-            request.total_steps = len(self.models_to_consult)
+            consensus_state = {
+                "initial_prompt": request.step,
+                "models_to_consult": request.models or [],
+                "accumulated_responses": [],
+                "total_steps": len(request.models or []),
+            }
+            # Update request total_steps to match models count
+            request.total_steps = consensus_state["total_steps"]
+
+        # If we have state, use it
+        if consensus_state:
+            models_to_consult = consensus_state.get("models_to_consult", [])
+            accumulated_responses = consensus_state.get("accumulated_responses", [])
+            initial_prompt = consensus_state.get("initial_prompt", request.step)
+        else:
+            # Fallback for when state is missing (shouldn't happen with proper thread creation)
+            logger.warning("No consensus state found, using request data")
+            models_to_consult = request.models or []
+            accumulated_responses = []
+            initial_prompt = request.step
 
         # For all steps (1 through total_steps), consult the corresponding model
         if request.step_number <= request.total_steps:
             # Calculate which model to consult for this step
             model_idx = request.step_number - 1  # 0-based index
 
-            if model_idx < len(self.models_to_consult):
+            if model_idx < len(models_to_consult):
                 # Consult the model for this step
-                model_response = await self._consult_model(self.models_to_consult[model_idx], request)
+                model_response = await self._consult_model(models_to_consult[model_idx], request, initial_prompt)
 
                 # Add to accumulated responses
-                self.accumulated_responses.append(model_response)
+                accumulated_responses.append(model_response)
+
+                # Update state in ThreadContext
+                if thread_id:
+                    updated_state = {
+                        "initial_prompt": initial_prompt,
+                        "models_to_consult": models_to_consult,
+                        "accumulated_responses": accumulated_responses,
+                        "total_steps": request.total_steps,
+                    }
+                    self._save_consensus_state(
+                        thread_id,
+                        updated_state,
+                        content=f"Consulted model {model_response['model']} with stance {model_response.get('stance', 'neutral')}",
+                    )
 
                 # Include the model response in the step data
                 response_data = {
@@ -488,11 +469,11 @@ of the evidence, even when it strongly points in one direction.""",
                     response_data["status"] = "consensus_workflow_complete"
                     response_data["consensus_complete"] = True
                     response_data["complete_consensus"] = {
-                        "initial_prompt": self.initial_prompt,
+                        "initial_prompt": initial_prompt,
                         "models_consulted": [
-                            f"{m['model']}:{m.get('stance', 'neutral')}" for m in self.accumulated_responses
+                            f"{m['model']}:{m.get('stance', 'neutral')}" for m in accumulated_responses
                         ],
-                        "total_responses": len(self.accumulated_responses),
+                        "total_responses": len(accumulated_responses),
                         "consensus_confidence": "high",
                     }
                     response_data["next_steps"] = (
@@ -512,7 +493,7 @@ of the evidence, even when it strongly points in one direction.""",
                     )
 
                 # Add accumulated responses for tracking
-                response_data["accumulated_responses"] = self.accumulated_responses
+                response_data["accumulated_responses"] = accumulated_responses
 
                 # Add metadata (since we're bypassing the base class metadata addition)
                 model_name = self.get_request_model_name(request)
@@ -522,14 +503,15 @@ of the evidence, even when it strongly points in one direction.""",
                     "model_name": model_name,
                     "model_used": model_name,
                     "provider_used": provider.get_provider_type().value,
+                    "continuation_id": thread_id,
                 }
 
                 return [TextContent(type="text", text=json.dumps(response_data, indent=2, ensure_ascii=False))]
 
-        # Otherwise, use standard workflow execution
+        # Otherwise, use standard workflow execution (which will handle thread creation properly)
         return await super().execute_workflow(arguments)
 
-    async def _consult_model(self, model_config: dict, request) -> dict:
+    async def _consult_model(self, model_config: dict, request, initial_prompt: str) -> dict:
         """Consult a single model and return its response."""
         try:
             # Get the provider for this model
@@ -537,7 +519,7 @@ of the evidence, even when it strongly points in one direction.""",
             provider = self.get_model_provider(model_name)
 
             # Prepare the prompt with any relevant files
-            prompt = self.initial_prompt
+            prompt = initial_prompt
             if request.relevant_files:
                 file_content, _ = self._prepare_file_content_for_prompt(
                     request.relevant_files,
@@ -626,140 +608,36 @@ MANDATORY FAIRNESS CONSTRAINTS:
 
 WHEN TO MODERATE CRITICISM (MUST OVERRIDE STANCE):
 - If the proposal addresses critical user needs effectively
-- If it follows established best practices with good reason
-- If benefits clearly and substantially outweigh risks
-- If it's the obvious right solution to the problem
+- If the solution is elegant, simple, and well-designed
+- If implementation risks are minimal and manageable
+- If the benefits clearly and substantially outweigh any concerns
 
 YOUR CRITICAL ANALYSIS SHOULD:
-- Identify legitimate risks and failure modes
+- Identify legitimate risks and challenges
 - Point out overlooked complexities
-- Suggest more efficient alternatives
+- Suggest alternatives that might work better
 - Highlight potential negative consequences
-- Question assumptions that may be flawed
+- Question assumptions constructively
 
-Remember: Being "against" means rigorous scrutiny to ensure quality, not undermining good ideas that deserve support.""",
-            "neutral": """BALANCED PERSPECTIVE
+Remember: Being "against" means responsible criticism that helps avoid pitfalls, not destructive negativity.""",
+            "neutral": """BALANCED ANALYTICAL PERSPECTIVE
 
 Provide objective analysis considering both positive and negative aspects. However, if there is overwhelming evidence
 that the proposal clearly leans toward being exceptionally good or particularly problematic, you MUST accurately
-reflect this reality. Being "balanced" means being truthful about the weight of evidence, not artificially creating
-50/50 splits when the reality is 90/10.
+reflect this reality.
 
-Your analysis should:
+YOUR NEUTRAL ANALYSIS SHOULD:
 - Present all significant pros and cons discovered
 - Weight them according to actual impact and likelihood
 - If evidence strongly favors one conclusion, clearly state this
 - Provide proportional coverage based on the strength of arguments
 - Help the questioner see the true balance of considerations
 
-Remember: Artificial balance that misrepresents reality is not helpful. True balance means accurate representation
-of the evidence, even when it strongly points in one direction.""",
+Remember: Being "neutral" means truthful representation of the evidence, not artificial balance.""",
         }
 
         stance_prompt = stance_prompts.get(stance, stance_prompts["neutral"])
         return base_prompt.replace("{stance_prompt}", stance_prompt)
-
-    def customize_workflow_response(self, response_data: dict, request) -> dict:
-        """Customize response for consensus workflow."""
-        # Store model responses in the response for tracking
-        if self.accumulated_responses:
-            response_data["accumulated_responses"] = self.accumulated_responses
-
-        # Add consensus-specific fields
-        if request.step_number == 1:
-            response_data["consensus_workflow_status"] = "initial_analysis_complete"
-        elif request.step_number < request.total_steps - 1:
-            response_data["consensus_workflow_status"] = "consulting_models"
-        else:
-            response_data["consensus_workflow_status"] = "ready_for_synthesis"
-
-        # Customize metadata for consensus workflow
-        self._customize_consensus_metadata(response_data, request)
-
-        return response_data
-
-    def _customize_consensus_metadata(self, response_data: dict, request) -> None:
-        """
-        Customize metadata for consensus workflow to accurately reflect multi-model nature.
-
-        The default workflow metadata shows the model running Agent's analysis steps,
-        but consensus is a multi-model tool that consults different models. We need
-        to provide accurate metadata that reflects this.
-        """
-        if "metadata" not in response_data:
-            response_data["metadata"] = {}
-
-        metadata = response_data["metadata"]
-
-        # Always preserve tool_name
-        metadata["tool_name"] = self.get_name()
-
-        if request.step_number == request.total_steps:
-            # Final step - show comprehensive consensus metadata
-            models_consulted = []
-            if self.models_to_consult:
-                models_consulted = [f"{m['model']}:{m.get('stance', 'neutral')}" for m in self.models_to_consult]
-
-            metadata.update(
-                {
-                    "workflow_type": "multi_model_consensus",
-                    "models_consulted": models_consulted,
-                    "consensus_complete": True,
-                    "total_models": len(self.models_to_consult) if self.models_to_consult else 0,
-                }
-            )
-
-            # Remove the misleading single model metadata
-            metadata.pop("model_used", None)
-            metadata.pop("provider_used", None)
-
-        else:
-            # Intermediate steps - show consensus workflow in progress
-            models_to_consult = []
-            if self.models_to_consult:
-                models_to_consult = [f"{m['model']}:{m.get('stance', 'neutral')}" for m in self.models_to_consult]
-
-            metadata.update(
-                {
-                    "workflow_type": "multi_model_consensus",
-                    "models_to_consult": models_to_consult,
-                    "consultation_step": request.step_number,
-                    "total_consultation_steps": request.total_steps,
-                }
-            )
-
-            # Remove the misleading single model metadata that shows Agent's execution model
-            # instead of the models being consulted
-            metadata.pop("model_used", None)
-            metadata.pop("provider_used", None)
-
-    def _add_workflow_metadata(self, response_data: dict, arguments: dict[str, Any]) -> None:
-        """
-        Override workflow metadata addition for consensus tool.
-
-        The consensus tool doesn't use single model metadata because it's a multi-model
-        workflow. Instead, we provide consensus-specific metadata that accurately
-        reflects the models being consulted.
-        """
-        # Initialize metadata if not present
-        if "metadata" not in response_data:
-            response_data["metadata"] = {}
-
-        # Add basic tool metadata
-        response_data["metadata"]["tool_name"] = self.get_name()
-
-        # The consensus-specific metadata is already added by _customize_consensus_metadata
-        # which is called from customize_workflow_response. We don't add the standard
-        # single-model metadata (model_used, provider_used) because it's misleading
-        # for a multi-model consensus workflow.
-
-        logger.debug(
-            f"[CONSENSUS_METADATA] {self.get_name()}: Using consensus-specific metadata instead of single-model metadata"
-        )
-
-    def store_initial_issue(self, step_description: str):
-        """Store initial prompt for model consultations."""
-        self.initial_prompt = step_description
 
     # Required abstract methods from BaseTool
     def get_request_model(self):
@@ -769,3 +647,120 @@ of the evidence, even when it strongly points in one direction.""",
     async def prepare_prompt(self, request) -> str:  # noqa: ARG002
         """Not used - workflow tools use execute_workflow()."""
         return ""  # Workflow tools use execute_workflow() directly
+
+    def _build_auto_panel(self, topic: str, max_models: int = 5) -> list[dict[str, Any]]:
+        """Build an automatic panel of diverse models with stance assignments.
+
+        Args:
+            topic: The topic/proposal being discussed
+            max_models: Maximum number of models to include
+
+        Returns:
+            List of model configurations with stances
+        """
+        # Get max models from env var or use default
+        if max_models is None:
+            max_models = int(os.environ.get("MCP_CONSENSUS_MAX_MODELS", "5"))
+
+        # Define model capabilities
+        DEEP_REASONING_MODELS = {"o3", "o3-mini", "grok-4", "grok-3", "gemini-2.5-pro", "pro", "gemini pro"}
+        FAST_RESPONSE_MODELS = {"o4-mini", "gemini-2.5-flash", "flash", "gemini-2.0-flash", "flash-2.0"}
+
+        # Get available models respecting restrictions
+        available_models = ModelProviderRegistry.get_available_models(respect_restrictions=True)
+
+        if not available_models:
+            raise ValueError(
+                "No models available for consensus. Please configure at least one provider "
+                "with API keys (OPENAI_API_KEY, GEMINI_API_KEY, XAI_API_KEY, etc.)"
+            )
+
+        # Categorize available models
+        deep_models = []
+        fast_models = []
+        balanced_models = []
+
+        for model_name, provider_type in available_models.items():
+            model_lower = model_name.lower()
+            if any(deep in model_lower for deep in DEEP_REASONING_MODELS):
+                deep_models.append((model_name, provider_type))
+            elif any(fast in model_lower for fast in FAST_RESPONSE_MODELS):
+                fast_models.append((model_name, provider_type))
+            else:
+                balanced_models.append((model_name, provider_type))
+
+        # Select diverse panel
+        selected_models = []
+        used_providers = set()
+
+        # 1. Ensure at least one deep reasoning model
+        if deep_models:
+            # Prefer models from different providers
+            for model, provider in deep_models:
+                if provider not in used_providers:
+                    selected_models.append(model)
+                    used_providers.add(provider)
+                    break
+            else:
+                # If all providers used, just take the first
+                selected_models.append(deep_models[0][0])
+                used_providers.add(deep_models[0][1])
+
+        # 2. Ensure at least one fast model
+        if fast_models and len(selected_models) < max_models:
+            for model, provider in fast_models:
+                if provider not in used_providers:
+                    selected_models.append(model)
+                    used_providers.add(provider)
+                    break
+            else:
+                # If all providers used, just take the first
+                if fast_models:
+                    selected_models.append(fast_models[0][0])
+
+        # 3. Add balanced models for diversity
+        for model, provider in balanced_models:
+            if len(selected_models) >= max_models:
+                break
+            if provider not in used_providers or len(selected_models) < 3:
+                selected_models.append(model)
+                used_providers.add(provider)
+
+        # 4. If still need more models, add from any category prioritizing provider diversity
+        all_models = [(m, p) for m, p in available_models.items() if m not in selected_models]
+        all_models.sort(key=lambda x: (x[1] in used_providers, x[0]))  # Prefer new providers
+
+        for model, _provider in all_models:
+            if len(selected_models) >= max_models:
+                break
+            selected_models.append(model)
+
+        # Ensure we have at least 3 models for a meaningful consensus
+        if len(selected_models) < 3:
+            logger.warning(
+                f"Only {len(selected_models)} models available for consensus. "
+                f"Recommend configuring more providers for better results."
+            )
+
+        # Assign stances
+        stance_pattern = ["for", "against", "neutral"]
+
+        # Check for environment variable override
+        default_stances = os.environ.get("MCP_CONSENSUS_DEFAULT_STANCES", "").strip()
+        if default_stances:
+            # Parse comma-separated stance pattern
+            custom_stances = [s.strip().lower() for s in default_stances.split(",") if s.strip()]
+            if custom_stances:
+                stance_pattern = custom_stances
+                logger.info(f"Using custom stance pattern from MCP_CONSENSUS_DEFAULT_STANCES: {stance_pattern}")
+
+        # Build model configurations with stances
+        model_configs = []
+        for i, model in enumerate(selected_models):
+            stance = stance_pattern[i % len(stance_pattern)]
+            model_configs.append({"model": model, "stance": stance})
+
+        model_info = [f"{m['model']}:{m['stance']}" for m in model_configs]
+        logger.info(f"Auto-selected {len(model_configs)} models for consensus: {model_info}")
+
+        return model_configs

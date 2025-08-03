@@ -43,16 +43,17 @@ class TestConsensusTool:
         assert step1_request.models[0]["model"] == "flash"
 
     def test_request_validation_missing_models_step1(self):
-        """Test that step 1 requires models field."""
-        with pytest.raises(ValueError, match="Step 1 requires 'models' field"):
-            ConsensusRequest(
-                step="Test step",
-                step_number=1,
-                total_steps=3,
-                next_step_required=True,
-                findings="Test findings",
-                # Missing models field
-            )
+        """Test that step 1 allows missing models field (for auto mode)."""
+        # Should NOT raise an error anymore - auto mode allows empty models
+        request = ConsensusRequest(
+            step="Test step",
+            step_number=1,
+            total_steps=3,
+            next_step_required=True,
+            findings="Test findings",
+            # Missing models field is now allowed
+        )
+        assert request.models is None  # Default None for auto mode
 
     def test_request_validation_later_steps(self):
         """Test request validation for steps 2+."""

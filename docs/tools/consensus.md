@@ -16,12 +16,19 @@ Consensus tool uses extended reasoning models by default, making it ideal for co
 
 The consensus tool orchestrates multiple AI models to provide diverse perspectives on your proposals:
 
-1. **Assign stances**: Each model can take a specific viewpoint (supportive, critical, or neutral)
-2. **Gather opinions**: Models analyze your proposal from their assigned perspective with built-in common-sense guardrails
-3. **Synthesize results**: Claude combines all perspectives into a balanced recommendation
-4. **Natural language**: Use simple descriptions like "supportive", "critical", or "against" - the tool handles synonyms automatically
+1. **Automatic model selection (NEW)**: Leave models empty or use 'auto' for intelligent selection of 3-5 diverse models
+2. **Assign stances**: Each model can take a specific viewpoint (supportive, critical, or neutral)
+3. **Gather opinions**: Models analyze your proposal from their assigned perspective with built-in common-sense guardrails
+4. **Synthesize results**: Claude combines all perspectives into a balanced recommendation
+5. **Natural language**: Use simple descriptions like "supportive", "critical", or "against" - the tool handles synonyms automatically
 
 ## Example Prompts
+
+**Automatic Model Selection (NEW):**
+```
+Use zen consensus to evaluate whether we should migrate from REST to GraphQL for our API
+```
+*The tool will automatically select 3-5 diverse models with balanced stances*
 
 **For/Against Analysis:**
 ```
@@ -48,6 +55,7 @@ Get a consensus from gemini supporting the idea for implementing X, grok opposin
 
 ## Key Features
 
+- **Automatic model selection (NEW)**: Leave models empty for intelligent selection of diverse panel
 - **Stance steering**: Assign specific perspectives (for/against/neutral) to each model with intelligent synonym handling
 - **Custom stance prompts**: Provide specific instructions for how each model should approach the analysis
 - **Ethical guardrails**: Models will refuse to support truly bad ideas regardless of assigned stance
@@ -63,7 +71,7 @@ Get a consensus from gemini supporting the idea for implementing X, grok opposin
 ## Tool Parameters
 
 - `prompt`: Detailed description of the proposal or decision to analyze (required)
-- `models`: List of model configurations with optional stance and custom instructions (required)
+- `models`: List of model configurations with optional stance and custom instructions (can be empty or ['auto'] for automatic selection)
 - `files`: Context files for informed analysis (absolute paths)
 - `images`: Visual references like diagrams or mockups (absolute paths)
 - `focus_areas`: Specific aspects to emphasize
@@ -72,7 +80,30 @@ Get a consensus from gemini supporting the idea for implementing X, grok opposin
 - `use_websearch`: Enable research for enhanced analysis (default: true)
 - `continuation_id`: Continue previous consensus discussions
 
+## Automatic Model Selection (Auto Mode)
+
+When you don't specify models or use `['auto']`, the tool intelligently selects a diverse panel:
+
+- **Panel size**: 3-5 models (configurable via `MCP_CONSENSUS_MAX_MODELS` environment variable)
+- **Model diversity**: Prioritizes different providers and architectures
+- **Capability balance**: Ensures at least one deep reasoning model (o3, grok-4, pro) and one fast model (o4-mini, flash)
+- **Stance assignment**: Automatically assigns balanced stances (for/against/neutral)
+- **Custom patterns**: Override default stance pattern with `MCP_CONSENSUS_DEFAULT_STANCES` environment variable
+
+**Environment Variables:**
+- `MCP_CONSENSUS_MAX_MODELS`: Maximum models in auto panel (default: 5)
+- `MCP_CONSENSUS_DEFAULT_STANCES`: Custom stance pattern (e.g., "neutral,for,against")
+
 ## Model Configuration Examples
+
+**Automatic Selection (NEW):**
+```json
+[]  // Empty array triggers auto mode
+```
+or
+```json
+["auto"]  // Explicit auto mode
+```
 
 **Basic For/Against:**
 ```json

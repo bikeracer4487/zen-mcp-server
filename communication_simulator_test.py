@@ -135,7 +135,12 @@ class CommunicationSimulator:
         """Get the Python path for the virtual environment"""
         current_dir = os.getcwd()
 
-        # Try .venv first (modern convention)
+        # Try .doug-zen_venv first (project-specific)
+        doug_zen_venv_python = os.path.join(current_dir, ".doug-zen_venv", "bin", "python")
+        if os.path.exists(doug_zen_venv_python):
+            return doug_zen_venv_python
+
+        # Try .venv (modern convention)
         venv_python = os.path.join(current_dir, ".venv", "bin", "python")
         if os.path.exists(venv_python):
             return venv_python

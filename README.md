@@ -3,7 +3,7 @@
 [zen_web.webm](https://github.com/user-attachments/assets/851e3911-7f06-47c0-a4ab-a2601236697c)
 
 <div align="center">
-  <b>🤖 <a href="https://www.anthropic.com/claude-code">Claude</a> OR <a href="https://github.com/google-gemini/gemini-cli">Gemini CLI</a> + [Gemini / OpenAI / Grok / OpenRouter / DIAL / Ollama / Any Model] = Your Ultimate AI Development Team</b>
+  <b>🤖 <a href="https://www.anthropic.com/claude-code">Claude</a> OR <a href="https://github.com/google-gemini/gemini-cli">Gemini CLI</a> + [Gemini / OpenAI / Grok-4 / Grok-3 / OpenRouter / DIAL / Ollama / Any Model] = Your Ultimate AI Development Team</b>
 </div>
 
 <br/>

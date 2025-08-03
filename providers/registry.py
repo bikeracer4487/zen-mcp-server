@@ -280,34 +280,49 @@ class ModelProviderRegistry:
 
         if tool_category == ToolModelCategory.EXTENDED_REASONING:
             # Prefer thinking-capable models for deep reasoning tools
+            # Priority order: O3 -> GROK-4 -> Gemini Pro -> Others
+
+            # 1. O3 (if OpenAI available)
             if openai_available and "o3" in openai_models:
                 return "o3"  # O3 for deep reasoning
-            elif openai_available and openai_models:
-                # Fall back to any available OpenAI model
-                return openai_models[0]
-            elif xai_available and "grok-3" in xai_models:
-                return "grok-3"  # GROK-3 for deep reasoning
-            elif xai_available and xai_models:
-                # Fall back to any available XAI model
-                return xai_models[0]
+
+            # 2. GROK-4 (if X.AI available)
+            elif xai_available and "grok-4" in xai_models:
+                return "grok-4"  # GROK-4 for advanced reasoning
+
+            # 3. Gemini Pro (if available)
             elif gemini_available and any("pro" in m for m in gemini_models):
                 # Find the pro model (handles full names)
                 return next(m for m in gemini_models if "pro" in m)
+
+            # 4. Any other OpenAI model
+            elif openai_available and openai_models:
+                return openai_models[0]
+
+            # 5. Any other X.AI model (GROK-3 as fallback)
+            elif xai_available and "grok-3" in xai_models:
+                return "grok-3"  # GROK-3 as fallback
+            elif xai_available and xai_models:
+                return xai_models[0]
+
+            # 6. Any other Gemini model
             elif gemini_available and gemini_models:
-                # Fall back to any available Gemini model
                 return gemini_models[0]
+
+            # 7. OpenRouter thinking models
             elif openrouter_available:
-                # Try to find thinking-capable model from openrouter
                 thinking_model = cls._find_extended_thinking_model()
                 if thinking_model:
                     return thinking_model
                 # Fallback to first available OpenRouter model
                 return openrouter_models[0]
+
+            # 8. Custom models
             elif custom_available:
-                # Fallback to custom models when available
                 return custom_models[0]
+
+            # 9. Fallback: gemini-2.5-pro
             else:
-                # Fallback to pro if nothing found
                 return "gemini-2.5-pro"
 
         elif tool_category == ToolModelCategory.FAST_RESPONSE:

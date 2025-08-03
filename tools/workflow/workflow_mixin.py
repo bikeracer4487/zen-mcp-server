@@ -39,6 +39,23 @@ logger = logging.getLogger(__name__)
 class BaseWorkflowMixin(ABC):
     """
     Abstract base class providing guided workflow functionality for tools.
+    
+    ROLE IN INHERITANCE HIERARCHY:
+    This mixin is designed to be combined with BaseTool via multiple inheritance:
+    
+    BaseTool + BaseWorkflowMixin → WorkflowTool → [Specific Tools]
+    
+    ARCHITECTURAL PATTERN:
+    - Mixin Pattern: Adds workflow behavior to any BaseTool
+    - Template Method: Defines workflow skeleton with customizable hooks
+    - Strategy Pattern: Configurable expert analysis and file embedding
+    
+    RESPONSIBILITIES:
+    - Multi-step workflow orchestration with forced investigation pauses
+    - Context-aware file embedding (references vs full content)
+    - Expert analysis integration with token budgeting
+    - Progress tracking and consolidated findings management
+    - Conversation memory and threading support
 
     This class implements a sophisticated workflow pattern where Claude performs
     systematic local work before calling external models for expert analysis.

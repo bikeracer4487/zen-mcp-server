@@ -174,6 +174,22 @@ class CodeReviewTool(WorkflowTool):
     """
     Code Review workflow tool for step-by-step code review and expert analysis.
 
+    INHERITANCE CHAIN:
+    BaseTool → WorkflowTool → CodeReviewTool
+    
+    INHERITED CAPABILITIES:
+    - From BaseTool: Model management, file processing, conversation memory
+    - From BaseWorkflowMixin (via WorkflowTool): Multi-step orchestration, expert analysis
+    - From WorkflowTool: Schema generation, workflow structure
+    
+    CODE REVIEW SPECIFIC FEATURES:
+    - Review type validation (full, security, performance, quick)
+    - Issue severity tracking and classification  
+    - Code quality assessment with detailed findings
+    - Security vulnerability identification
+    - Performance bottleneck analysis
+    - Architectural assessment capabilities
+
     This tool implements a structured code review workflow that guides users through
     methodical investigation steps, ensuring thorough code examination, issue identification,
     and quality assessment before reaching conclusions. It supports complex review scenarios

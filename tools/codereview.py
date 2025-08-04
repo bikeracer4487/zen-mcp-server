@@ -25,6 +25,7 @@ if TYPE_CHECKING:
     from tools.models import ToolModelCategory
 
 from config import TEMPERATURE_ANALYTICAL
+from config.constants import Confidence, Severity, ReviewType
 from systemprompts import CODEREVIEW_PROMPT
 from tools.shared.base_models import WorkflowRequest
 
@@ -137,7 +138,7 @@ class CodeReviewRequest(WorkflowRequest):
     issues_found: list[dict] = Field(
         default_factory=list, description=CODEREVIEW_WORKFLOW_FIELD_DESCRIPTIONS["issues_found"]
     )
-    confidence: Optional[str] = Field("low", description=CODEREVIEW_WORKFLOW_FIELD_DESCRIPTIONS["confidence"])
+    confidence: Optional[str] = Field(Confidence.LOW, description=CODEREVIEW_WORKFLOW_FIELD_DESCRIPTIONS["confidence"])
 
     # Optional backtracking field
     backtrack_from_step: Optional[int] = Field(
@@ -326,7 +327,7 @@ class CodeReviewTool(WorkflowTool):
             },
             "confidence": {
                 "type": "string",
-                "enum": ["exploring", "low", "medium", "high", "very_high", "almost_certain", "certain"],
+                "enum": [c.value for c in Confidence],
                 "description": CODEREVIEW_WORKFLOW_FIELD_DESCRIPTIONS["confidence"],
             },
             "backtrack_from_step": {
@@ -361,7 +362,7 @@ class CodeReviewTool(WorkflowTool):
             },
             "severity_filter": {
                 "type": "string",
-                "enum": ["critical", "high", "medium", "low", "all"],
+                "enum": [s.value for s in Severity] + ["all"],
                 "default": "all",
                 "description": CODEREVIEW_WORKFLOW_FIELD_DESCRIPTIONS["severity_filter"],
             },
@@ -387,7 +388,7 @@ class CodeReviewTool(WorkflowTool):
                 "Look for obvious issues: bugs, security concerns, performance problems",
                 "Note any code smells, anti-patterns, or areas of concern",
             ]
-        elif confidence in ["exploring", "low"]:
+        elif confidence in [Confidence.EXPLORING, Confidence.LOW]:
             # Need deeper investigation
             return [
                 "Examine specific code sections you've identified as concerning",
@@ -397,7 +398,7 @@ class CodeReviewTool(WorkflowTool):
                 "Identify code quality issues: readability, maintainability, error handling",
                 "Search for over-engineering, unnecessary complexity, or design patterns that could be simplified",
             ]
-        elif confidence in ["medium", "high"]:
+        elif confidence in [Confidence.MEDIUM, Confidence.HIGH]:
             # Close to completion - need final verification
             return [
                 "Verify all identified issues have been properly documented with severity levels",
@@ -544,7 +545,7 @@ class CodeReviewTool(WorkflowTool):
         """
         Code review workflow skips expert analysis when the CLI agent has "certain" confidence.
         """
-        return request.confidence == "certain" and not request.next_step_required
+        return request.confidence == Confidence.CERTAIN and not request.next_step_required
 
     def store_initial_issue(self, step_description: str):
         """Store initial request for expert analysis."""
@@ -566,7 +567,7 @@ class CodeReviewTool(WorkflowTool):
 
     def get_confidence_level(self, request) -> str:
         """Code review tools use 'certain' for high confidence."""
-        return "certain"
+        return Confidence.CERTAIN
 
     def get_completion_message(self) -> str:
         """Code review-specific completion message."""
@@ -647,7 +648,7 @@ class CodeReviewTool(WorkflowTool):
                 f"{self.get_name()} next time, use step_number: {step_number + 1} and report specific "
                 f"files examined, issues found, and code quality assessments discovered."
             )
-        elif confidence in ["exploring", "low"]:
+        elif confidence in [Confidence.EXPLORING, Confidence.LOW]:
             next_steps = (
                 f"STOP! Do NOT call {self.get_name()} again yet. Based on your findings, you've identified areas that need "
                 f"deeper analysis. MANDATORY ACTIONS before calling {self.get_name()} step {step_number + 1}:\\n"
@@ -655,7 +656,7 @@ class CodeReviewTool(WorkflowTool):
                 + f"\\n\\nOnly call {self.get_name()} again with step_number: {step_number + 1} AFTER "
                 + "completing these code review tasks."
             )
-        elif confidence in ["medium", "high"]:
+        elif confidence in [Confidence.MEDIUM, Confidence.HIGH]:
             next_steps = (
                 f"WAIT! Your code review needs final verification. DO NOT call {self.get_name()} immediately. REQUIRED ACTIONS:\\n"
                 + "\\n".join(f"{i+1}. {action}" for i, action in enumerate(required_actions))

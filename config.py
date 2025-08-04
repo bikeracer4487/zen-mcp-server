@@ -148,3 +148,23 @@ LOCALE = os.getenv("LOCALE", "")
 # Threading configuration
 # Simple in-memory conversation threading for stateless MCP environment
 # Conversations persist only during the Claude session
+
+# --- Public API Definition ---
+# Define the public API of this configuration module using __all__.
+# This ensures only intended constants are exported via config/__init__.py
+
+# Find all public, uppercase constants defined in this module.
+_public_constants = [
+    name for name in dir() 
+    if not name.startswith('_') and name.isupper()
+]
+
+# Explicitly list any dunder/metadata attributes to also export.
+_public_metadata = [
+    '__version__', 
+    '__author__', 
+    '__updated__'
+]
+
+# This defines the module's public API.
+__all__ = _public_constants + _public_metadata

@@ -38,14 +38,12 @@ spec = importlib.util.spec_from_file_location("config_module", config_path)
 config_module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(config_module)
 
-# Re-export the constants that are used throughout the codebase
-__version__ = getattr(config_module, "__version__", "5.8.2")
-__updated__ = getattr(config_module, "__updated__", "2025-08-03")
-__author__ = getattr(config_module, "__author__", "Fahad Gilani")
-DEFAULT_MODEL = getattr(config_module, "DEFAULT_MODEL", "auto")
-IS_AUTO_MODE = getattr(config_module, "IS_AUTO_MODE", True)
-TEMPERATURE_ANALYTICAL = getattr(config_module, "TEMPERATURE_ANALYTICAL", 0.2)
-TEMPERATURE_CREATIVE = getattr(config_module, "TEMPERATURE_CREATIVE", 0.7)
-TEMPERATURE_BALANCED = getattr(config_module, "TEMPERATURE_BALANCED", 0.5)
-MCP_PROMPT_SIZE_LIMIT = getattr(config_module, "MCP_PROMPT_SIZE_LIMIT", 100000)
-DEFAULT_THINKING_MODE_THINKDEEP = getattr(config_module, "DEFAULT_THINKING_MODE_THINKDEEP", "high")
+# Get a reference to the current module object (config/__init__.py)
+_current_module = sys.modules[__name__]
+
+# Automatically export all public attributes defined in config_module.__all__
+# This eliminates the need to manually maintain a sync'd list of exports
+for attr_name in config_module.__all__:
+    # If an attr is in __all__, it's guaranteed to exist in the module
+    attr_value = getattr(config_module, attr_name)
+    setattr(_current_module, attr_name, attr_value)

@@ -8,7 +8,38 @@ constants used throughout the application.
 Configuration values can be overridden by environment variables where appropriate.
 """
 
+import logging
 import os
+from typing import TypeVar, Callable
+
+T = TypeVar('T')
+
+
+def _get_and_cast_env(key: str, default: T, cast_func: Callable[[str], T]) -> T:
+    """
+    Fetches an environment variable, casts it to a target type,
+    and falls back to a default value if not set or if casting fails.
+    
+    Args:
+        key: Environment variable name
+        default: Default value to use if env var is missing or invalid
+        cast_func: Function to cast string value to target type
+        
+    Returns:
+        The cast value or default if casting fails
+    """
+    value_str = os.getenv(key)
+    if value_str is None:
+        return default
+
+    try:
+        return cast_func(value_str)
+    except (ValueError, TypeError) as e:
+        logging.warning(
+            f"Invalid value '{value_str}' for configuration key '{key}': {e}. "
+            f"Falling back to default: '{default}'."
+        )
+        return default
 
 # Version and metadata
 # These values are used in server responses and for tracking releases
@@ -116,22 +147,18 @@ def _calculate_mcp_prompt_limit() -> int:
     Returns:
         Maximum character count for user input prompts
     """
-    # Check for Claude's MAX_MCP_OUTPUT_TOKENS environment variable
-    max_tokens_str = os.getenv("MAX_MCP_OUTPUT_TOKENS")
+    def _cast_and_calculate_limit(max_tokens_str: str) -> int:
+        """Cast token string and calculate character limit."""
+        max_tokens = int(max_tokens_str)  # Let ValueError propagate to be caught by helper
+        if max_tokens <= 0:
+            raise ValueError(f"MAX_MCP_OUTPUT_TOKENS must be positive, got {max_tokens}")
+        # Allocate 60% of tokens for input, convert to characters (~4 chars per token)
+        input_token_budget = int(max_tokens * 0.6)
+        return input_token_budget * 4
 
-    if max_tokens_str:
-        try:
-            max_tokens = int(max_tokens_str)
-            # Allocate 60% of tokens for input, convert to characters (~4 chars per token)
-            input_token_budget = int(max_tokens * 0.6)
-            character_limit = input_token_budget * 4
-            return character_limit
-        except (ValueError, TypeError):
-            # Fall back to default if MAX_MCP_OUTPUT_TOKENS is not a valid integer
-            pass
-
-    # Default fallback: 60,000 characters (equivalent to ~15k tokens input of 25k total)
-    return 60_000
+    # Use the casting helper for robust environment variable handling
+    # Default: 60,000 characters (equivalent to ~15k tokens input of 25k total)
+    return _get_and_cast_env("MAX_MCP_OUTPUT_TOKENS", 60_000, _cast_and_calculate_limit)
 
 
 MCP_PROMPT_SIZE_LIMIT: int = _calculate_mcp_prompt_limit()

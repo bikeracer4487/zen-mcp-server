@@ -172,3 +172,39 @@ class TestConfigImportRegression:
             # Restore the original value
             if original_value is not None:
                 config.DEFAULT_THINKING_MODE_THINKDEEP = original_value
+
+    def test_runtime_validation_helper_handles_invalid_env_vars(self):
+        """Test that config system gracefully handles invalid environment variable values"""
+        import os
+        import importlib
+        from unittest.mock import patch
+        import logging
+
+        # Test various invalid values that should fall back to defaults
+        invalid_values = [
+            "not-a-number",
+            "16k",
+            "",
+            "  ",
+            "abc123",
+            "-1",  # Technically valid int but may be invalid for some configs
+        ]
+
+        for invalid_value in invalid_values:
+            with patch.dict(os.environ, {"MAX_MCP_OUTPUT_TOKENS": invalid_value}):
+                # Capture log output
+                with patch("logging.warning") as mock_warning:
+                    # Re-import config to trigger validation
+                    import config
+
+                    importlib.reload(config)
+
+                    # Should fall back to default value
+                    assert config.MCP_PROMPT_SIZE_LIMIT == 60000, f"Failed to fallback for invalid value: {invalid_value}"
+
+                    # Should have logged a warning
+                    assert mock_warning.called, f"No warning logged for invalid value: {invalid_value}"
+                    warning_message = mock_warning.call_args[0][0]
+                    assert "Invalid value" in warning_message
+                    assert invalid_value in warning_message
+                    assert "Falling back to default" in warning_message

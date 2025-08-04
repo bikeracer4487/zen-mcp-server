@@ -1618,3 +1618,32 @@ class BaseWorkflowMixin(ABC):
         The BaseWorkflowMixin formats responses internally.
         """
         return response
+    
+    def _apply_status_mapping(self, response_data: dict, status_mappings: dict[str, str]) -> None:
+        """
+        Apply tool-specific status mapping to response data.
+        
+        This method generalizes the status mapping pattern used across all workflow tools.
+        Instead of duplicating status mapping logic in each tool, tools can call this
+        method with their specific mappings.
+        
+        Args:
+            response_data: Response dictionary to modify
+            status_mappings: Dict mapping status type to tool-specific status
+                           Keys: "in_progress", "pause_for", "required", "complete"
+        """
+        from config.constants import TOOL_STATUS_TEMPLATES
+        
+        tool_name = self.get_name()
+        
+        # Create generic status mapping using templates
+        generic_status_mapping = {
+            TOOL_STATUS_TEMPLATES["in_progress"].format(tool_name=tool_name): status_mappings.get("in_progress", f"{tool_name}_in_progress"),
+            TOOL_STATUS_TEMPLATES["pause_for"].format(tool_name=tool_name): status_mappings.get("pause_for", f"pause_for_{tool_name}"),
+            f"{tool_name}_required": status_mappings.get("required", f"{tool_name}_required"),
+            f"{tool_name}_complete": status_mappings.get("complete", f"{tool_name}_complete"),
+        }
+        
+        # Apply status mapping
+        if response_data.get("status") in generic_status_mapping:
+            response_data["status"] = generic_status_mapping[response_data["status"]]

@@ -164,9 +164,53 @@ class CodeReviewRequest(WorkflowRequest):
 
     @model_validator(mode="after")
     def validate_step_one_requirements(self):
-        """Ensure step 1 has required relevant_files field."""
-        if self.step_number == 1 and not self.relevant_files:
-            raise ValueError("Step 1 requires 'relevant_files' field to specify code files or directories to review")
+        """Ensure step 1 has required relevant_files field with valid paths."""
+        if self.step_number == 1:
+            if not self.relevant_files:
+                raise ValueError("Step 1 requires 'relevant_files' field to specify code files or directories to review")
+            
+            # Validate path safety and format
+            import os
+            from config.exceptions import ValidationError
+            
+            for file_path in self.relevant_files:
+                if not isinstance(file_path, str):
+                    raise ValidationError(f"File path must be string, got {type(file_path)}: {file_path}")
+                
+                # Check for path traversal attempts
+                if ".." in file_path or file_path.startswith("/"):
+                    # Allow absolute paths but validate they don't contain traversal
+                    normalized = os.path.normpath(file_path)
+                    if ".." in normalized and not os.path.isabs(file_path):
+                        raise ValidationError(f"Path traversal detected in: {file_path}")
+                
+                # Check for empty or whitespace-only paths
+                if not file_path.strip():
+                    raise ValidationError("Empty or whitespace-only file paths are not allowed")
+                    
+                # Basic file extension validation for code review context
+                if file_path.endswith('/'):
+                    continue  # Directory path, skip extension check
+                    
+                # Allow common code file extensions and some config files
+                allowed_extensions = {
+                    '.py', '.js', '.ts', '.tsx', '.jsx', '.java', '.c', '.cpp', '.h', '.hpp',
+                    '.cs', '.php', '.rb', '.go', '.rs', '.swift', '.kt', '.scala', '.clj',
+                    '.html', '.css', '.scss', '.sass', '.less', '.vue', '.svelte',
+                    '.json', '.yaml', '.yml', '.toml', '.ini', '.cfg', '.conf',
+                    '.md', '.rst', '.txt', '.xml', '.sql', '.sh', '.bash', '.zsh',
+                    '.dockerfile', '.makefile', '.gradle', '.pom'
+                }
+                
+                file_ext = os.path.splitext(file_path.lower())[1]
+                if file_ext and file_ext not in allowed_extensions and not any(
+                    name in file_path.lower() for name in ['makefile', 'dockerfile', 'readme', 'license', 'changelog']
+                ):
+                    # Warn but don't fail for unknown extensions
+                    import logging
+                    logger = logging.getLogger(__name__)
+                    logger.warning(f"Unusual file extension for code review: {file_path}")
+        
         return self
 
 
@@ -200,6 +244,7 @@ class CodeReviewTool(WorkflowTool):
         super().__init__()
         self.initial_request = None
         self.review_config = {}
+        self._severity_counts_cache = None
 
     def get_name(self) -> str:
         return "codereview"
@@ -648,28 +693,20 @@ class CodeReviewTool(WorkflowTool):
                     "severity_filter": request.severity_filter,
                 }
 
-        # Convert generic status names to code review-specific ones
-        tool_name = self.get_name()
-        status_mapping = {
-            f"{tool_name}_in_progress": "code_review_in_progress",
-            f"pause_for_{tool_name}": "pause_for_code_review",
-            f"{tool_name}_required": "code_review_required",
-            f"{tool_name}_complete": "code_review_complete",
-        }
-
-        if response_data["status"] in status_mapping:
-            response_data["status"] = status_mapping[response_data["status"]]
+        # Convert generic status names to code review-specific ones using generalized method
+        self._apply_status_mapping(response_data, {
+            "in_progress": "code_review_in_progress",
+            "pause_for": "pause_for_code_review", 
+            "required": "code_review_required",
+            "complete": "code_review_complete",
+        })
 
         # Rename status field to match code review workflow
+        tool_name = self.get_name()
         if f"{tool_name}_status" in response_data:
             response_data["code_review_status"] = response_data.pop(f"{tool_name}_status")
-            # Add code review-specific status fields
-            response_data["code_review_status"]["issues_by_severity"] = {}
-            for issue in self.consolidated_findings.issues_found:
-                severity = issue.get("severity", "unknown")
-                if severity not in response_data["code_review_status"]["issues_by_severity"]:
-                    response_data["code_review_status"]["issues_by_severity"][severity] = 0
-                response_data["code_review_status"]["issues_by_severity"][severity] += 1
+            # Add code review-specific status fields with cached severity counts
+            response_data["code_review_status"]["issues_by_severity"] = self._cache_severity_counts()
             response_data["code_review_status"]["review_confidence"] = self.get_request_confidence(request)
 
         # Map complete_codereviewworkflow to complete_code_review
@@ -681,6 +718,25 @@ class CodeReviewTool(WorkflowTool):
             response_data["code_review_complete"] = response_data.pop(f"{tool_name}_complete")
 
         return response_data
+    
+    def _cache_severity_counts(self):
+        """Cache severity counts from issues for performance optimization."""
+        if self._severity_counts_cache is None:
+            from collections import defaultdict
+            self._severity_counts_cache = defaultdict(int)
+            for issue in self.consolidated_findings.issues_found:
+                severity = issue.get("severity", "unknown")
+                self._severity_counts_cache[severity] += 1
+        return dict(self._severity_counts_cache)
+    
+    def _invalidate_severity_cache(self):
+        """Invalidate severity counts cache when findings are updated."""
+        self._severity_counts_cache = None
+    
+    def _update_consolidated_findings(self, step_data: dict):
+        """Override to invalidate cache when findings are updated."""
+        super()._update_consolidated_findings(step_data)
+        self._invalidate_severity_cache()
 
     # Required abstract methods from BaseTool
     def get_request_model(self):

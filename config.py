@@ -1,9 +1,30 @@
 """
-Configuration and constants for Zen MCP Server
+Configuration Management for the Zen MCP Server.
 
-This module centralizes all configuration settings for the Zen MCP Server.
-It defines model configurations, token limits, temperature defaults, and other
-constants used throughout the application.
+This module defines all configuration constants for the application. It follows a
+robust, self-maintaining pattern to ensure stability and ease of development.
+
+**Pattern for Adding New Configuration:**
+
+1.  **Define as a Constant:** Add your new configuration variable as an
+    UPPERCASE_SNAKE_CASE constant in this file.
+
+2.  **Add Type Hints:** Provide a clear type hint (e.g., `MY_SETTING: int = ...`).
+    This enables static analysis and improves IDE support.
+
+3.  **Use the Validation Helper:** For any value derived from an environment
+    variable that requires type casting, use the `_get_and_cast_env()` helper.
+    This provides safe, resilient casting with automatic fallbacks and
+    warnings for invalid operator input.
+
+4.  **Automatic Export:** Any public, uppercase constant defined in this file is
+    automatically discovered and made available for import from the `config`
+    package via the `__all__` mechanism. No changes are needed in `config/__init__.py`.
+
+Example:
+    NEW_FEATURE_TIMEOUT_SECONDS: int = _get_and_cast_env(
+        "NEW_FEATURE_TIMEOUT_SECONDS", 30, int
+    )
 
 Configuration values can be overridden by environment variables where appropriate.
 """

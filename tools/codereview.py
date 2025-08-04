@@ -25,7 +25,7 @@ if TYPE_CHECKING:
     from tools.models import ToolModelCategory
 
 from config import TEMPERATURE_ANALYTICAL
-from config.constants import Confidence, Severity, ReviewType
+from config.constants import Confidence, Severity
 from systemprompts import CODEREVIEW_PROMPT
 from tools.shared.base_models import WorkflowRequest
 
@@ -168,50 +168,98 @@ class CodeReviewRequest(WorkflowRequest):
         """Ensure step 1 has required relevant_files field with valid paths."""
         if self.step_number == 1:
             if not self.relevant_files:
-                raise ValueError("Step 1 requires 'relevant_files' field to specify code files or directories to review")
-            
+                raise ValueError(
+                    "Step 1 requires 'relevant_files' field to specify code files or directories to review"
+                )
+
             # Validate path safety and format
             import os
+
             from config.exceptions import ValidationError
-            
+
             for file_path in self.relevant_files:
                 if not isinstance(file_path, str):
                     raise ValidationError(f"File path must be string, got {type(file_path)}: {file_path}")
-                
+
                 # Check for path traversal attempts
                 if ".." in file_path or file_path.startswith("/"):
                     # Allow absolute paths but validate they don't contain traversal
                     normalized = os.path.normpath(file_path)
                     if ".." in normalized and not os.path.isabs(file_path):
                         raise ValidationError(f"Path traversal detected in: {file_path}")
-                
+
                 # Check for empty or whitespace-only paths
                 if not file_path.strip():
                     raise ValidationError("Empty or whitespace-only file paths are not allowed")
-                    
+
                 # Basic file extension validation for code review context
-                if file_path.endswith('/'):
+                if file_path.endswith("/"):
                     continue  # Directory path, skip extension check
-                    
+
                 # Allow common code file extensions and some config files
                 allowed_extensions = {
-                    '.py', '.js', '.ts', '.tsx', '.jsx', '.java', '.c', '.cpp', '.h', '.hpp',
-                    '.cs', '.php', '.rb', '.go', '.rs', '.swift', '.kt', '.scala', '.clj',
-                    '.html', '.css', '.scss', '.sass', '.less', '.vue', '.svelte',
-                    '.json', '.yaml', '.yml', '.toml', '.ini', '.cfg', '.conf',
-                    '.md', '.rst', '.txt', '.xml', '.sql', '.sh', '.bash', '.zsh',
-                    '.dockerfile', '.makefile', '.gradle', '.pom'
+                    ".py",
+                    ".js",
+                    ".ts",
+                    ".tsx",
+                    ".jsx",
+                    ".java",
+                    ".c",
+                    ".cpp",
+                    ".h",
+                    ".hpp",
+                    ".cs",
+                    ".php",
+                    ".rb",
+                    ".go",
+                    ".rs",
+                    ".swift",
+                    ".kt",
+                    ".scala",
+                    ".clj",
+                    ".html",
+                    ".css",
+                    ".scss",
+                    ".sass",
+                    ".less",
+                    ".vue",
+                    ".svelte",
+                    ".json",
+                    ".yaml",
+                    ".yml",
+                    ".toml",
+                    ".ini",
+                    ".cfg",
+                    ".conf",
+                    ".md",
+                    ".rst",
+                    ".txt",
+                    ".xml",
+                    ".sql",
+                    ".sh",
+                    ".bash",
+                    ".zsh",
+                    ".dockerfile",
+                    ".makefile",
+                    ".gradle",
+                    ".pom",
                 }
-                
+
                 file_ext = os.path.splitext(file_path.lower())[1]
-                if file_ext and file_ext not in allowed_extensions and not any(
-                    name in file_path.lower() for name in ['makefile', 'dockerfile', 'readme', 'license', 'changelog']
+                if (
+                    file_ext
+                    and file_ext not in allowed_extensions
+                    and not any(
+                        name in file_path.lower()
+                        for name in ["makefile", "dockerfile", "readme", "license", "changelog"]
+                    )
                 ):
                     # Warn but don't fail for unknown extensions
                     import logging
+
                     logger = logging.getLogger(__name__)
                     logger.warning(f"Unusual file extension for code review: {file_path}")
-        
+
         return self
 
 
@@ -221,15 +269,15 @@ class CodeReviewTool(WorkflowTool):
 
     INHERITANCE CHAIN:
     BaseTool → WorkflowTool → CodeReviewTool
-    
+
     INHERITED CAPABILITIES:
     - From BaseTool: Model management, file processing, conversation memory
     - From BaseWorkflowMixin (via WorkflowTool): Multi-step orchestration, expert analysis
     - From WorkflowTool: Schema generation, workflow structure
-    
+
     CODE REVIEW SPECIFIC FEATURES:
     - Review type validation (full, security, performance, quick)
-    - Issue severity tracking and classification  
+    - Issue severity tracking and classification
     - Code quality assessment with detailed findings
     - Security vulnerability identification
     - Performance bottleneck analysis
@@ -634,48 +682,65 @@ class CodeReviewTool(WorkflowTool):
         """
         Provide step-specific guidance for code review workflow.
         """
-        # Generate the next steps instruction based on required actions
         required_actions = self.get_required_actions(step_number, confidence, request.findings, request.total_steps)
-
-        if step_number == 1:
-            next_steps = (
-                f"MANDATORY: DO NOT call the {self.get_name()} tool again immediately. You MUST first examine "
-                f"the code files thoroughly using appropriate tools. CRITICAL AWARENESS: You need to understand "
-                f"the code structure, identify potential issues across security, performance, and quality dimensions, "
-                f"and look for architectural concerns, over-engineering, unnecessary complexity, and scalability issues. "
-                f"Use file reading tools, code analysis, and systematic examination to gather comprehensive information. "
-                f"Only call {self.get_name()} again AFTER completing your investigation. When you call "
-                f"{self.get_name()} next time, use step_number: {step_number + 1} and report specific "
-                f"files examined, issues found, and code quality assessments discovered."
-            )
-        elif confidence in [Confidence.EXPLORING, Confidence.LOW]:
-            next_steps = (
-                f"STOP! Do NOT call {self.get_name()} again yet. Based on your findings, you've identified areas that need "
-                f"deeper analysis. MANDATORY ACTIONS before calling {self.get_name()} step {step_number + 1}:\\n"
-                + "\\n".join(f"{i+1}. {action}" for i, action in enumerate(required_actions))
-                + f"\\n\\nOnly call {self.get_name()} again with step_number: {step_number + 1} AFTER "
-                + "completing these code review tasks."
-            )
-        elif confidence in [Confidence.MEDIUM, Confidence.HIGH]:
-            next_steps = (
-                f"WAIT! Your code review needs final verification. DO NOT call {self.get_name()} immediately. REQUIRED ACTIONS:\\n"
-                + "\\n".join(f"{i+1}. {action}" for i, action in enumerate(required_actions))
-                + f"\\n\\nREMEMBER: Ensure you have identified all significant issues across all severity levels and "
-                f"verified the completeness of your review. Document findings with specific file references and "
-                f"line numbers where applicable, then call {self.get_name()} with step_number: {step_number + 1}."
-            )
-        else:
-            next_steps = (
-                f"PAUSE REVIEW. Before calling {self.get_name()} step {step_number + 1}, you MUST examine more code thoroughly. "
-                + "Required: "
-                + ", ".join(required_actions[:2])
-                + ". "
-                + f"Your next {self.get_name()} call (step_number: {step_number + 1}) must include "
-                f"NEW evidence from actual code analysis, not just theories. NO recursive {self.get_name()} calls "
-                f"without investigation work!"
-            )
-
+        next_steps = self._generate_step_guidance_message(step_number, confidence, required_actions)
         return {"next_steps": next_steps}
+
+    def _generate_step_guidance_message(self, step_number: int, confidence: str, required_actions: list[str]) -> str:
+        """Generate step-specific guidance message based on confidence level."""
+        if step_number == 1:
+            return self._get_initial_step_guidance()
+        elif confidence in [Confidence.EXPLORING, Confidence.LOW]:
+            return self._get_exploration_guidance(step_number, required_actions)
+        elif confidence in [Confidence.MEDIUM, Confidence.HIGH]:
+            return self._get_verification_guidance(step_number, required_actions)
+        else:
+            return self._get_default_guidance(step_number, required_actions)
+
+    def _get_initial_step_guidance(self) -> str:
+        """Get guidance message for the initial step."""
+        return (
+            f"MANDATORY: DO NOT call the {self.get_name()} tool again immediately. You MUST first examine "
+            f"the code files thoroughly using appropriate tools. CRITICAL AWARENESS: You need to understand "
+            f"the code structure, identify potential issues across security, performance, and quality dimensions, "
+            f"and look for architectural concerns, over-engineering, unnecessary complexity, and scalability issues. "
+            f"Use file reading tools, code analysis, and systematic examination to gather comprehensive information. "
+            f"Only call {self.get_name()} again AFTER completing your investigation. When you call "
+            f"{self.get_name()} next time, use step_number: 2 and report specific "
+            f"files examined, issues found, and code quality assessments discovered."
+        )
+
+    def _get_exploration_guidance(self, step_number: int, required_actions: list[str]) -> str:
+        """Get guidance for low confidence/exploring stages."""
+        return (
+            f"STOP! Do NOT call {self.get_name()} again yet. Based on your findings, you've identified areas that need "
+            f"deeper analysis. MANDATORY ACTIONS before calling {self.get_name()} step {step_number + 1}:\\n"
+            + "\\n".join(f"{i+1}. {action}" for i, action in enumerate(required_actions))
+            + f"\\n\\nOnly call {self.get_name()} again with step_number: {step_number + 1} AFTER "
+            + "completing these code review tasks."
+        )
+
+    def _get_verification_guidance(self, step_number: int, required_actions: list[str]) -> str:
+        """Get guidance for medium/high confidence requiring verification."""
+        return (
+            f"WAIT! Your code review needs final verification. DO NOT call {self.get_name()} immediately. REQUIRED ACTIONS:\\n"
+            + "\\n".join(f"{i+1}. {action}" for i, action in enumerate(required_actions))
+            + f"\\n\\nREMEMBER: Ensure you have identified all significant issues across all severity levels and "
+            f"verified the completeness of your review. Document findings with specific file references and "
+            f"line numbers where applicable, then call {self.get_name()} with step_number: {step_number + 1}."
+        )
+
+    def _get_default_guidance(self, step_number: int, required_actions: list[str]) -> str:
+        """Get default guidance for other confidence levels."""
+        return (
+            f"PAUSE REVIEW. Before calling {self.get_name()} step {step_number + 1}, you MUST examine more code thoroughly. "
+            + "Required: "
+            + ", ".join(required_actions[:2])
+            + ". "
+            + f"Your next {self.get_name()} call (step_number: {step_number + 1}) must include "
+            f"NEW evidence from actual code analysis, not just theories. NO recursive {self.get_name()} calls "
+            f"without investigation work!"
+        )
 
     def customize_workflow_response(self, response_data: dict, request) -> dict:
         """
@@ -695,12 +760,15 @@ class CodeReviewTool(WorkflowTool):
                 }
 
         # Convert generic status names to code review-specific ones using generalized method
-        self._apply_status_mapping(response_data, {
-            "in_progress": "code_review_in_progress",
-            "pause_for": "pause_for_code_review", 
-            "required": "code_review_required",
-            "complete": "code_review_complete",
-        })
+        self._apply_status_mapping(
+            response_data,
+            {
+                "in_progress": "code_review_in_progress",
+                "pause_for": "pause_for_code_review",
+                "required": "code_review_required",
+                "complete": "code_review_complete",
+            },
+        )
 
         # Rename status field to match code review workflow
         tool_name = self.get_name()
@@ -719,21 +787,22 @@ class CodeReviewTool(WorkflowTool):
             response_data["code_review_complete"] = response_data.pop(f"{tool_name}_complete")
 
         return response_data
-    
+
     def _cache_severity_counts(self):
         """Cache severity counts from issues for performance optimization."""
         if self._severity_counts_cache is None:
             from collections import defaultdict
+
             self._severity_counts_cache = defaultdict(int)
             for issue in self.consolidated_findings.issues_found:
                 severity = issue.get("severity", "unknown")
                 self._severity_counts_cache[severity] += 1
         return dict(self._severity_counts_cache)
-    
+
     def _invalidate_severity_cache(self):
         """Invalidate severity counts cache when findings are updated."""
         self._severity_counts_cache = None
-    
+
     def _update_consolidated_findings(self, step_data: dict):
         """Override to invalidate cache when findings are updated."""
         super()._update_consolidated_findings(step_data)

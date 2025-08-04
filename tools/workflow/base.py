@@ -30,13 +30,13 @@ class WorkflowTool(BaseTool, BaseWorkflowMixin):
     This class uses multiple inheritance to combine two key components:
     - BaseTool: Provides core tool interface, model management, file processing
     - BaseWorkflowMixin: Adds workflow orchestration, step tracking, expert analysis
-    
+
     METHOD RESOLUTION ORDER (MRO):
     1. WorkflowTool (this class)
-    2. BaseTool (tool interface) 
+    2. BaseTool (tool interface)
     3. BaseWorkflowMixin (workflow behavior)
     4. object
-    
+
     This ensures BaseTool methods take precedence while BaseWorkflowMixin
     provides workflow functionality without conflicts.
 

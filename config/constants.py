@@ -10,9 +10,9 @@ from typing import Final
 
 class Confidence(str, Enum):
     """Confidence levels for workflow tool assessments."""
-    
+
     CERTAIN = "certain"
-    ALMOST_CERTAIN = "almost_certain" 
+    ALMOST_CERTAIN = "almost_certain"
     VERY_HIGH = "very_high"
     HIGH = "high"
     MEDIUM = "medium"
@@ -22,7 +22,7 @@ class Confidence(str, Enum):
 
 class Severity(str, Enum):
     """Severity levels for issues and findings."""
-    
+
     CRITICAL = "critical"
     HIGH = "high"
     MEDIUM = "medium"
@@ -31,7 +31,7 @@ class Severity(str, Enum):
 
 class ReviewType(str, Enum):
     """Code review types."""
-    
+
     FULL = "full"
     SECURITY = "security"
     PERFORMANCE = "performance"
@@ -40,7 +40,7 @@ class ReviewType(str, Enum):
 
 class WorkflowStatus(str, Enum):
     """Workflow status values."""
-    
+
     IN_PROGRESS = "in_progress"
     COMPLETED = "completed"
     PAUSED = "paused"
@@ -52,18 +52,18 @@ TOOL_STATUS_TEMPLATES: Final[dict[str, str]] = {
     "in_progress": "{tool_name}_in_progress",
     "pause_for": "pause_for_{tool_name}",
     "completed": "{tool_name}_completed",
-    "requires_action": "{tool_name}_requires_action"
+    "requires_action": "{tool_name}_requires_action",
 }
 
 # Response field names
 RESPONSE_FIELDS: Final[dict[str, str]] = {
     "issues_by_severity": "issues_by_severity",
-    "files_checked": "files_checked", 
+    "files_checked": "files_checked",
     "relevant_files": "relevant_files",
     "relevant_context": "relevant_context",
     "confidence": "confidence",
     "step_number": "step_number",
-    "total_steps": "total_steps"
+    "total_steps": "total_steps",
 }
 
 # Default values

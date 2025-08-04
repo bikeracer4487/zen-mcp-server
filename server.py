@@ -380,9 +380,12 @@ def configure_providers():
     # Log environment variable status for debugging
     logger.debug("Checking environment variables for API keys...")
     api_keys_to_check = ["OPENAI_API_KEY", "OPENROUTER_API_KEY", "GEMINI_API_KEY", "XAI_API_KEY", "CUSTOM_API_URL"]
+    missing_keys = []
     for key in api_keys_to_check:
         value = os.getenv(key)
         logger.debug(f"  {key}: {'[PRESENT]' if value else '[MISSING]'}")
+        if not value:
+            missing_keys.append(key)
     from providers import ModelProviderRegistry
     from providers.base import ProviderType
     from providers.custom import CustomProvider
@@ -513,6 +516,11 @@ def configure_providers():
 
     if len(priority_info) > 1:
         logger.info(f"Provider priority: {' → '.join(priority_info)}")
+
+    # Warn about missing optional API keys
+    if missing_keys:
+        logger.warning(f"Optional API keys not configured (functionality will be limited): {', '.join(missing_keys)}")
+        logger.warning("To enable additional model providers, set the appropriate environment variables")
 
     # Register cleanup function for providers
     def cleanup_providers():
@@ -1307,17 +1315,26 @@ async def main():
     # (when handle_list_tools is called)
 
     # Log current model mode
-    from config import IS_AUTO_MODE
+    try:
+        from config import DEFAULT_THINKING_MODE_THINKDEEP, IS_AUTO_MODE
 
-    if IS_AUTO_MODE:
-        logger.info("Model mode: AUTO (Claude will select the best model for each task)")
-    else:
-        logger.info(f"Model mode: Fixed model '{DEFAULT_MODEL}'")
+        if IS_AUTO_MODE:
+            logger.info("Model mode: AUTO (Claude will select the best model for each task)")
+        else:
+            logger.info(f"Model mode: Fixed model '{DEFAULT_MODEL}'")
 
-    # Import here to avoid circular imports
-    from config import DEFAULT_THINKING_MODE_THINKDEEP
+        logger.info(f"Default thinking mode (ThinkDeep): {DEFAULT_THINKING_MODE_THINKDEEP}")
 
-    logger.info(f"Default thinking mode (ThinkDeep): {DEFAULT_THINKING_MODE_THINKDEEP}")
+    except ImportError as e:
+        from config.exceptions import ConfigurationError
+
+        logger.error(f"Configuration import error: {e}")
+        raise ConfigurationError(f"Missing required configuration constant: {e}")
+    except Exception as e:
+        from config.exceptions import ConfigurationError
+
+        logger.error(f"Unexpected configuration error: {e}")
+        raise ConfigurationError(f"Configuration initialization failed: {e}")
 
     logger.info(f"Available tools: {list(TOOLS.keys())}")
     logger.info("Server ready - waiting for tool requests...")

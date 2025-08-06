@@ -31,21 +31,21 @@ Configuration values can be overridden by environment variables where appropriat
 
 import logging
 import os
-from typing import TypeVar, Callable
+from typing import Callable, TypeVar
 
-T = TypeVar('T')
+T = TypeVar("T")
 
 
 def _get_and_cast_env(key: str, default: T, cast_func: Callable[[str], T]) -> T:
     """
     Fetches an environment variable, casts it to a target type,
     and falls back to a default value if not set or if casting fails.
-    
+
     Args:
         key: Environment variable name
         default: Default value to use if env var is missing or invalid
         cast_func: Function to cast string value to target type
-        
+
     Returns:
         The cast value or default if casting fails
     """
@@ -57,10 +57,10 @@ def _get_and_cast_env(key: str, default: T, cast_func: Callable[[str], T]) -> T:
         return cast_func(value_str)
     except (ValueError, TypeError) as e:
         logging.warning(
-            f"Invalid value '{value_str}' for configuration key '{key}': {e}. "
-            f"Falling back to default: '{default}'."
+            f"Invalid value '{value_str}' for configuration key '{key}': {e}. " f"Falling back to default: '{default}'."
         )
         return default
+
 
 # Version and metadata
 # These values are used in server responses and for tracking releases
@@ -168,6 +168,7 @@ def _calculate_mcp_prompt_limit() -> int:
     Returns:
         Maximum character count for user input prompts
     """
+
     def _cast_and_calculate_limit(max_tokens_str: str) -> int:
         """Cast token string and calculate character limit."""
         max_tokens = int(max_tokens_str)  # Let ValueError propagate to be caught by helper
@@ -202,17 +203,10 @@ LOCALE: str = os.getenv("LOCALE", "")
 # This ensures only intended constants are exported via config/__init__.py
 
 # Find all public, uppercase constants defined in this module.
-_public_constants = [
-    name for name in globals().keys() 
-    if not name.startswith('_') and name.isupper()
-]
+_public_constants = [name for name in globals().keys() if not name.startswith("_") and name.isupper()]
 
 # Explicitly list any dunder/metadata attributes to also export.
-_public_metadata = [
-    '__version__', 
-    '__author__', 
-    '__updated__'
-]
+_public_metadata = ["__version__", "__author__", "__updated__"]
 
 # This defines the module's public API.
 __all__ = _public_constants + _public_metadata

@@ -742,6 +742,10 @@ class BaseWorkflowMixin(ABC):
                 "error": f"Validation error: {str(e)}",
                 "step_number": arguments.get("step_number", 0),
             }
+            # Add metadata to error responses too
+            self._add_workflow_metadata(error_data, arguments)
+            return [TextContent(type="text", text=json.dumps(error_data, indent=2, ensure_ascii=False))]
+
         except (FileNotFoundError, PermissionError, OSError) as e:
             # File system related errors
             logger.error(f"File system error in {self.get_name()}: {e}")
@@ -750,6 +754,10 @@ class BaseWorkflowMixin(ABC):
                 "error": f"File system error: {str(e)}",
                 "step_number": arguments.get("step_number", 0),
             }
+            # Add metadata to error responses too
+            self._add_workflow_metadata(error_data, arguments)
+            return [TextContent(type="text", text=json.dumps(error_data, indent=2, ensure_ascii=False))]
+
         except Exception as e:
             # Unexpected errors - log with full traceback and re-raise for proper debugging
             logger.error(f"Unexpected error in {self.get_name()}: {e}", exc_info=True)
@@ -758,10 +766,8 @@ class BaseWorkflowMixin(ABC):
                 "error": f"Unexpected error: {str(e)}",
                 "step_number": arguments.get("step_number", 0),
             }
-
             # Add metadata to error responses too
             self._add_workflow_metadata(error_data, arguments)
-
             return [TextContent(type="text", text=json.dumps(error_data, indent=2, ensure_ascii=False))]
 
     # Hook methods for tool customization

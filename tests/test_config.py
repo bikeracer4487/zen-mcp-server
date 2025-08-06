@@ -175,10 +175,9 @@ class TestConfigImportRegression:
 
     def test_runtime_validation_helper_handles_invalid_env_vars(self):
         """Test that config system gracefully handles invalid environment variable values"""
-        import os
         import importlib
+        import os
         from unittest.mock import patch
-        import logging
 
         # Test various invalid values that should fall back to defaults
         invalid_values = [
@@ -200,7 +199,9 @@ class TestConfigImportRegression:
                     importlib.reload(config)
 
                     # Should fall back to default value
-                    assert config.MCP_PROMPT_SIZE_LIMIT == 60000, f"Failed to fallback for invalid value: {invalid_value}"
+                    assert (
+                        config.MCP_PROMPT_SIZE_LIMIT == 60000
+                    ), f"Failed to fallback for invalid value: {invalid_value}"
 
                     # Should have logged a warning
                     assert mock_warning.called, f"No warning logged for invalid value: {invalid_value}"

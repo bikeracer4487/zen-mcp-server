@@ -1627,33 +1627,82 @@ class BaseWorkflowMixin(ABC):
 
     def _apply_status_mapping(self, response_data: dict, status_mappings: dict[str, str]) -> None:
         """
-        Apply tool-specific status mapping to response data.
+        Apply status mapping to response data in a consistent way.
 
-        This method generalizes the status mapping pattern used across all workflow tools.
-        Instead of duplicating status mapping logic in each tool, tools can call this
-        method with their specific mappings.
+        - Accepts generic status keys and synonyms:
+          "in_progress", "pause_for", "completed"/"complete",
+          "requires_action"/"required".
+        - Defaults to tool-specific values using TOOL_STATUS_TEMPLATES when not
+          provided in status_mappings.
+        - Also recognizes tool-specific source statuses (e.g., "{tool}_in_progress")
+          and maps them to the same targets for robustness.
 
         Args:
             response_data: Response dictionary to modify
-            status_mappings: Dict mapping status type to tool-specific status
-                           Keys: "in_progress", "pause_for", "required", "complete"
+            status_mappings: Dict mapping generic status names to tool-specific statuses
         """
         from config.constants import TOOL_STATUS_TEMPLATES
 
+        # Validate inputs defensively
+        if not isinstance(response_data, dict) or not isinstance(status_mappings, dict):
+            return
+
         tool_name = self.get_name()
 
-        # Create generic status mapping using templates
-        generic_status_mapping = {
-            TOOL_STATUS_TEMPLATES["in_progress"].format(tool_name=tool_name): status_mappings.get(
-                "in_progress", f"{tool_name}_in_progress"
-            ),
-            TOOL_STATUS_TEMPLATES["pause_for"].format(tool_name=tool_name): status_mappings.get(
-                "pause_for", f"pause_for_{tool_name}"
-            ),
-            f"{tool_name}_required": status_mappings.get("required", f"{tool_name}_required"),
-            f"{tool_name}_complete": status_mappings.get("complete", f"{tool_name}_complete"),
-        }
+        # Precompute tool-specific canonical keys
+        tool_in_progress_key = TOOL_STATUS_TEMPLATES["in_progress"].format(tool_name=tool_name)
+        tool_pause_for_key = TOOL_STATUS_TEMPLATES["pause_for"].format(tool_name=tool_name)
+        tool_completed_key = TOOL_STATUS_TEMPLATES["completed"].format(tool_name=tool_name)
+        tool_requires_action_key = TOOL_STATUS_TEMPLATES["requires_action"].format(tool_name=tool_name)
 
-        # Apply status mapping
-        if response_data.get("status") in generic_status_mapping:
-            response_data["status"] = generic_status_mapping[response_data["status"]]
+        # Determine targets from provided mappings only; otherwise default to identity for tool-specific keys
+        has_ip = "in_progress" in status_mappings
+        has_pf = "pause_for" in status_mappings
+        completed_target_from_mapping = status_mappings.get("completed") or status_mappings.get("complete")
+        requires_action_target_from_mapping = status_mappings.get("requires_action") or status_mappings.get("required")
+
+        target_in_progress = status_mappings.get("in_progress", tool_in_progress_key)
+        target_pause_for = status_mappings.get("pause_for", tool_pause_for_key)
+        target_completed = completed_target_from_mapping or tool_completed_key
+        target_requires_action = requires_action_target_from_mapping or tool_requires_action_key
+
+        # Build mapping from possible source statuses to desired targets
+        generic_status_mapping: dict[str, str] = {}
+
+        # Only map generic inputs if explicitly provided in mappings
+        if has_ip:
+            generic_status_mapping["in_progress"] = target_in_progress
+        if has_pf:
+            generic_status_mapping["pause_for"] = target_pause_for
+        if completed_target_from_mapping is not None:
+            generic_status_mapping["completed"] = target_completed
+            generic_status_mapping["complete"] = target_completed  # synonym
+        if requires_action_target_from_mapping is not None:
+            generic_status_mapping["requires_action"] = target_requires_action
+            generic_status_mapping["required"] = target_requires_action  # synonym
+
+        # Always recognize tool-specific inputs; default to identity when no mapping provided
+        generic_status_mapping[tool_in_progress_key] = target_in_progress if has_ip else tool_in_progress_key
+        generic_status_mapping[tool_pause_for_key] = target_pause_for if has_pf else tool_pause_for_key
+        generic_status_mapping[tool_completed_key] = target_completed if completed_target_from_mapping is not None else tool_completed_key
+        generic_status_mapping[tool_requires_action_key] = (
+            target_requires_action if requires_action_target_from_mapping is not None else tool_requires_action_key
+        )
+        # Historical variants
+        generic_status_mapping[f"{tool_name}_complete"] = (
+            target_completed if completed_target_from_mapping is not None else f"{tool_name}_complete"
+        )
+        generic_status_mapping[f"{tool_name}_required"] = (
+            target_requires_action if requires_action_target_from_mapping is not None else f"{tool_name}_required"
+        )
+
+        current_status = response_data.get("status")
+
+        # First, allow explicit mappings for arbitrary statuses (including None)
+        if current_status in status_mappings:
+            response_data["status"] = status_mappings[current_status]
+            return
+
+        # Otherwise, use the generic/tool-specific mapping
+        if current_status in generic_status_mapping:
+            response_data["status"] = generic_status_mapping[current_status]

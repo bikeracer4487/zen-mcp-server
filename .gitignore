@@ -177,6 +177,7 @@ CLAUDE.local.md
 
 # Claude Code personal settings
 .claude/settings.local.json
+.claude/.tabstate
 
 # Standalone mode files
 .zen_venv/
